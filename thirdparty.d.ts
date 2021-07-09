@@ -25,14 +25,17 @@ declare module "aes-js" {
 }
 
 declare module "libnpmpublish" {
+    export type NpmOptions = Record<string, any>;
+    /*
     export type Options = {
         access?: "public" | "restricted";
         npmVersion?: string;
         otp?: string;
         token?: string;
     };
+    */
 
-    export function publish(path: string, manifest: string, options: Options): Promise<void>
+    export function publish(manifest: any, tarData: Buffer, options: NpmOptions): Promise<void>
 }
 
 declare module "npm-profile" {
@@ -41,13 +44,9 @@ declare module "npm-profile" {
     export type TokenResult = {
         token: string;
         key: string;
-        cidr_whitelist: Array<string>;
+        cidr_whitelist: null | Array<string>;
         created: Date;
         readonly: boolean;
-    };
-
-    export type LoginResult = {
-        token: string;
     };
 
     export type AccountResult = {
@@ -65,11 +64,59 @@ declare module "npm-profile" {
         github: string;
     }
 
-    export function loginCouch(username: string, password: string, options?: NpmOptions): Promise<LoginResult>;
+    export function loginCouch(username: string, password: string, options?: NpmOptions): Promise<NpmOptions>;
 
     export function createToken(password: string, noWrite: boolean, cidr_whitelist: Array<string>, options?: NpmOptions): Promise<TokenResult>
     export function listTokens(options?: NpmOptions): Promise<Array<TokenResult>>
     export function removeToken(id: string, options?: NpmOptions): Promise<void>;
 
     export function get(options?: NpmOptions): Promise<AccountResult>;
+}
+
+declare module "tar" {
+    import { Writable } from "stream";
+
+    export interface PackOptions {
+        cwd?: string;
+        gzip?: boolean;
+        portable?: boolean;
+    }
+
+    export interface HeaderOptions {
+       path: string;
+       mode: number;
+       size: number;
+       type: string;
+       mtime: Date;
+       uid: number;
+       gid: number;
+       uname: string;
+       gname: string;
+    }
+
+    export class Header{
+        constructor(options: HeaderOptions);
+    }
+
+    export class ReadEntry {
+        constructor(header: Header);
+        write(data: Buffer): void;
+        end(pad?: Buffer): void;
+    }
+
+    class PackSync {
+        constructor(options?: PackOptions);
+        write(file: string | ReadEntry): void;
+        pipe(stream: Writable): void;
+        end(): void;
+    }
+
+    export class Pack {
+        constructor(options?: PackOptions);
+        write(file: string | ReadEntry): void;
+        pipe(stream: Writable): void;
+        end(): void;
+
+        static Sync: new (options?: PackOptions) => PackSync;
+    }
 }

@@ -1,14 +1,16 @@
 import crypto from "crypto";
 import fs from "fs";
-import { resolve } from "path";
+import { join, resolve } from "path";
+import { Writable } from "stream";
 
 import { publish as npmPublish } from "libnpmpublish";
 import profile from "npm-profile";
 import semver from "semver";
+import tar from "tar";
 
 import type { Config } from "./config";
 import { colorify, getPassword, getPrompt } from "./log";
-import { getUrl, run, sha256 } from "./utils";
+import { getUrl, normalizeJson, run, sha256 } from "./utils";
 
 export type Package = {
     dependencies: { [ name: string ]: string };
@@ -33,6 +35,33 @@ export type NpmAccount = {
     email: string;
     created: Date;
 };
+
+
+class WriteBuffer extends Writable {
+    private _data: Array<Buffer>;
+
+    constructor() {
+        super();
+        this._data = [ ];
+    }
+
+    get data(): Buffer {
+        switch (this._data.length) {
+            case 0:
+                return Buffer.from([ ]);
+            case 1:
+                break;
+            default:
+                this._data = [ Buffer.concat(this._data) ];
+        }
+        return this._data[0];
+    }
+
+    _write(chunk: Buffer, encoding: string, callback: (error?: Error) => void) {
+        this._data.push(Buffer.from(chunk));
+        callback();
+    }
+}
 
 async function _retryOtp<T>(options: Record<string, any>, func: () => Promise<T>): Promise<T> {
     try {
@@ -196,13 +225,13 @@ export class NPM {
         return true;
     }
 
-    async publish(path: string, manifest: any): Promise<void> {
+    async publish(manifest: any, tarData: Buffer): Promise<void> {
         const npmOptions = await this.#getNpmOptions();
         if (npmOptions == null) { throw new Error("not logged in "); }
         const { options } = npmOptions;
 
         return _retryOtp(options, async () => {
-            return await npmPublish(path, manifest, options);
+            return await npmPublish(manifest, tarData, options);
         });
     }
 
@@ -213,7 +242,7 @@ export class NPM {
             (<any>error).result = result;
             throw error;
         }
-        return JSON.parse(result.stdout)[0].files.map((info: { path: string }) => info.path);
+        return JSON.parse(result.stdout)[0].files.map((info: { path: string }) => info.path).sort();
     }
 
     static computeTarballHash(path: string): string {
@@ -242,5 +271,86 @@ export class NPM {
             return `${ JSON.stringify(filename) }:"${ hashes[filename] }"`
         }).join(",") + "}"));
     }
+/*
+const h = new tar.Header({
+  path: 'some-file.txt',
+  mode: 0o0644,
+  size: size,
+  type: 'File',
+  mtime: new Date(),
+  uid: process.getuid(),
+  gid: process.getgid(),
+  uname: process.env.USER,
+  gname: process.env.GROUP
+})
+*/
+    static createTarball(path: string): Buffer {
+        path = resolve(path);
+
+        const now = new Date();
+
+        const writeBuffer = new WriteBuffer();
+        const pack = new tar.Pack.Sync({ gzip: true, portable: true });
+        pack.pipe(writeBuffer);
+
+        const addFile = (filename: string, content: Buffer) => {
+            // See: https://github.com/npm/node-tar/issues/143
+            const readEntry = new tar.ReadEntry(new tar.Header({
+                path: filename,
+                mode: 0o0644,
+                size: content.length,
+                type: 'File',
+                mtime: now,
+                uid: process.getuid(),
+                gid: process.getgid(),
+                uname: "ethers",
+                gname: "ethers"
+            }));
+
+            pack.write(readEntry);
+
+            readEntry.write(content);
+            readEntry.end(Buffer.alloc((Math.ceil(content.length / 512) * 512) - content.length));
+            readEntry.end();
+        }
+
+        const hashes: Record<string, string> = { };
+
+        const packList = NPM.getPackList(path);
+        let pkgContent: any = null;
+        packList.forEach((filename) => {
+            const content = fs.readFileSync(resolve(path, filename));
+
+            // We include the package.json last, so we can update the tarballHash
+            if (filename === "package.json") {
+                // Normalize the package (can't have the hsah inside)
+                pkgContent = JSON.parse(content.toString());
+                delete pkgContent.gitHead;
+                delete pkgContent.tarballHash;
+                hashes[filename] = sha256(Buffer.from(normalizeJson(pkgContent)));
+                return;
+            }
+            hashes[filename] = sha256(content);
+            addFile(join("package", filename), content);
+        });
+        if (pkgContent == null) { throw new Error("missing package.json"); }
+
+        pkgContent.tarballHash = sha256(Buffer.from("{" + packList.map((filename) => {
+            return `${ JSON.stringify(filename) }:"${ hashes[filename] }"`
+        }).join(",") + "}"));
+        pkgContent.gitHead = "todo";
+
+        addFile(join("package", "package.json"), Buffer.from(normalizeJson(pkgContent)));
+        pack.end();
+
+        const tarball = writeBuffer.data;
+        (<any>tarball).integrity = crypto.createHash("sha512").update(tarball).digest("base64");
+        (<any>tarball).resolved = path;
+        (<any>tarball).from = "file:";
+        return tarball
+    }
 }
 
+const tarball = NPM.createTarball(".");
+console.log("NPM", tarball);
+fs.writeFileSync("./test-tarball.tgz", tarball);
