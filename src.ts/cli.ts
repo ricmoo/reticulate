@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import crypto = require("crypto");
-import profile from "npm-profile";
+import os from "os";
+import { resolve } from "path";
 
-import { ConfigError } from "./config";
-import { colorify, getPassword, getPrompt } from "./log";
-import { computeTarballHash, getPackage } from "./npm";
-import { config } from "./reticulate-config";
+import { Config, ConfigError } from "./config";
+import { colorify } from "./log";
+import type { NpmLogin } from "./npm";
+import { NPM } from "./npm";
 import { getDateTime } from "./utils";
 
 function showHelp() {
@@ -23,143 +23,138 @@ function showHelp() {
     console.log("");
 }
 
-async function listKeys(args: Array<string>): Promise<void> {
+const config = new Config(resolve(os.homedir(), ".reticulaterc"));
+const npm = new NPM(config);
+
+function plural(word: string, count: number): string {
+    return word + ((count === 1) ? "": "s");
+}
+
+async function listKeys(args: Array<string>): Promise<number> {
     const keys = (await config.keys()).filter((k) => (k !== "_junk"));;
-    console.log(`Found ${ keys.length } key${ (keys.length === 1) ? "": "s"}:`);
+    console.log(`Found ${ keys.length } ${ plural("key", keys.length) }:`);
     keys.forEach((key) => {
         console.log(` - ${ JSON.stringify(key) }`);
     });
+    return 0;
 }
 
-async function getKey(args: Array<string>): Promise<void> {
+async function getKey(args: Array<string>): Promise<number> {
     const key = shiftArgs(args);
     const value = await config.get(key);
     console.log(`${ key }: ${ JSON.stringify(value) }`);
+    return 0;
 }
 
-async function setKey(args: Array<string>): Promise<void> {
+async function setKey(args: Array<string>): Promise<number> {
     const key = shiftArgs(args);
     const value = shiftArgs(args);
     await config.set(key, value);
+    return 0;
 }
 
-async function hoist(args: Array<string>): Promise<void> {
+async function hoist(args: Array<string>): Promise<number> {
     throw new Error("not implemented");
 }
 
-async function ratsnest(args: Array<string>): Promise<void> {
+async function ratsnest(args: Array<string>): Promise<number> {
     throw new Error("not implemented");
 }
 
-async function view(args: Array<string>): Promise<void> {
+async function view(args: Array<string>): Promise<number> {
     for (let i = 0; i < args.length; i++) {
         const name = args[i];
-        console.log("TB", computeTarballHash(name));
-        const pkg = await getPackage(name);
+        console.log("TB", NPM.computeTarballHash(name));
+        const pkg = await npm.getPackage(name);
         if (!pkg) { continue; }
         console.log(name);
         console.log(pkg);
     }
+    return 0;
 }
 
-async function _getNpmOptions(): Promise<null | any> {
-    const options: any = { };
-
-    const npmToken = await config.get("npm-token");
-    if (!npmToken) { return null; }
-
-    const token = npmToken.trim().split("=");
-    options[token[0]] = token[1];
-
-    //const info = 
-    await profile.get(options);
-    //console.log(info);
-
-    return options;
-}
-
-async function npmLogin(args: Array<string>): Promise<void> {
-    const options = await _getNpmOptions();
-    if (options) {
+async function npmLogin(args: Array<string>): Promise<number> {
+   if (await npm.isLoggedIn()) {
         console.log(colorify.green("Alreay logged in."));
-        return;
+        return 0;
     }
-
-    const username = await getPrompt("Username (npm): ");
-    const password = await getPassword("Password (npm): ");
-
-    try {
-        const result = await profile.loginCouch(username, password);
-        await config.set("npm-token", `/\/registry.npmjs.org/:_authToken=${ result.token }`);
-    } catch (error) {
-        if (error.message.match(/Unable to authenticate/i)) {
-            throw new Error("incorrect NPM password");
-        } else if (error.message.match(/no user with the username/i)) {
-            throw new Error("incorrect NPM username");
-        }
-        throw error;
-    }
+    return ((await npm.login()) ? 0: 1);
 }
 
-async function npmLogins(args: Array<string>): Promise<void> {
-    const options = await _getNpmOptions();
-    if (options == null) {
-        console.log(colorify.bold("Not logged into NPM"));
-        return;
+async function npmLogins(args: Array<string>): Promise<number> {
+    const logins = await npm.getLogins();
+    if (logins == null) {
+        console.log(colorify.bold("Not logged into NPM (use `reticulate npm-login`)"));
+        return 1;
     }
 
-    const tokenKey = Object.keys(options).filter((k) => (k.indexOf("_authToken") >= 0))[0] || "_invalid";
-    const current = crypto.createHash("sha512").update(options[tokenKey]).digest("hex")
+    console.log(colorify.bold(`Found ${ logins.length } login ${ plural("token", logins.length) }:`));
 
-    const tokens = await profile.listTokens(options);
-    console.log(colorify.bold(`Found ${ tokens.length } login token${ (tokens.length === 1) ? "": "s" }:`));
-    tokens.forEach((token) => {
-        if (current === token.key) {
-            console.log(colorify.green(`  ${ token.token }   ${ getDateTime(new Date(token.created)) }   * current`));
+    logins.forEach((login) => {
+        if (login.current) {
+            console.log(colorify.green(`  ${ login.id }   ${ getDateTime(new Date(login.created)) }   * current`));
         } else {
-            console.log(`  ${ token.token }   ${ getDateTime(new Date(token.created)) }`);
+            console.log(`  ${ login.id }   ${ getDateTime(new Date(login.created)) }`);
         }
     });
+
+    return 0;
 }
 
-async function npmLogout(args: Array<string>): Promise<void> {
-    const options = await _getNpmOptions();
-    if (options == null) {
-        console.log(colorify.bold("Not logged into NPM"));
-        return;
+async function npmLogout(args: Array<string>): Promise<number> {
+    const logins = await npm.getLogins();
+    if (logins == null) {
+        console.log(colorify.bold("Not logged into NPM (use `reticulate login`)"));
+        return 1;
     }
 
-    const tokens = (await profile.listTokens(options)).reduce((accum, token) => {
-        accum[token.token] = token.key;
-        return accum;
-    }, <Record<string, string>>{ });
-
-    const tokenKey = Object.keys(options).filter((k) => (k.indexOf("_authToken") >= 0))[0] || "_invalid";
-    const current = crypto.createHash("sha512").update(options[tokenKey]).digest("hex");
-
-    const remove = args.map((k) => (tokens[k] || k));
-    if (remove.length === 0) { remove.push(current); }
-
-    for (let i = 0; i < remove.length; i++) {
-        await profile.removeToken(remove[i], options);
-    }
-
-    if (remove.indexOf(current) >= 0) {
-        config.set("npm-token", null);
-        const otherCount = remove.length - 1;
-        if (otherCount) { console.log(`Removed ${ otherCount } external login session${ (otherCount === 1) ? "": "s" }.`); }
+    if (args.length === 0) {
+        await npm.logout();
         console.log(colorify.bold("Logged out."));
+
     } else {
-        console.log(`Removed ${ remove.length } external login session${ (remove.length === 1) ? "": "s" }.`);
+        const loginLookup = logins.reduce((accum, token) => {
+            accum[token.id] = token;
+            return accum;
+        }, <Record<string, NpmLogin>>{ });
+
+        // Get all matching logouts (separating the current login)
+        let current: null | NpmLogin = null;
+        const logouts = args.reduce((accum, id) => {
+            const login = loginLookup[id];
+            if (login == null) { throw new Error(`unknown login: ${ id }`); }
+
+            if (login.current) {
+                current = login;
+            } else {
+                accum.push(login);
+            }
+
+            return accum;
+        }, <Array<NpmLogin>>[ ])
+
+        // Logout all external logins first (otherwise we'd lose permission to log them out)
+        for (let i = 0; i < logouts.length; i++) {
+            await logouts[i].logout();
+        }
+        if (logouts.length) { console.log(`Removed ${ logouts.length } external login ${ plural("session", logouts.length) }.`); }
+
+        // Log out the current login
+        if (current) {
+            await (<NpmLogin>current).logout();
+            console.log(colorify.bold("Logged out."));
+        }
     }
+
+    return 0;
 }
 
-async function publish(args: Array<string>): Promise<void> {
+async function publish(args: Array<string>): Promise<number> {
     throw new Error("not implemented");
 }
 
 type Command = {
-    func: (args: Array<string>) => Promise<void>;
+    func: (args: Array<string>) => Promise<number>;
     argCount?: number;
     args?: string;
 };
@@ -224,14 +219,12 @@ let debug = false;
     }
 
     try {
-        await command.func(args);
+        return await command.func(args);
     } catch (error) {
         console.log(`ERROR: ${ error.message }`);
         if (debug) { console.log(error); }
         return 2;
     }
-
-    return 0;
 
 })().then((status) => {
     if (status !== 0) { process.exit(status); }
