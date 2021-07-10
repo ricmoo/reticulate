@@ -22,6 +22,8 @@ export type Package = {
 //    location: "remote" | "local";
 };
 
+export type PackageJson = Record<string, any>
+
 export type NpmLogin = {
     id: string;
     created: Date;
@@ -61,6 +63,80 @@ class WriteBuffer extends Writable {
         this._data.push(Buffer.from(chunk));
         callback();
     }
+}
+
+function createTarball(path: string): { tarball: Buffer, manifest: PackageJson } {
+    path = resolve(path);
+
+    const manifest = JSON.parse(fs.readFileSync(resolve(path, "package.json")).toString());
+    delete manifest.gitHead;
+    delete manifest.tarballHash;
+
+    const now = new Date();
+
+    const writeBuffer = new WriteBuffer();
+
+    const pack = new tar.Pack.Sync({ gzip: true, portable: true });
+    pack.pipe(writeBuffer);
+
+    const addFile = (filename: string, content: Buffer) => {
+        // See: https://github.com/npm/node-tar/issues/143
+        const readEntry = new tar.ReadEntry(new tar.Header({
+            path: join("package", filename),
+            mode: 0o0644,
+            size: content.length,
+            type: 'File',
+            mtime: now,
+            uid: 22, //process.getuid(),
+            gid: 555, //process.getgid(),
+            uname: "reticulate",
+            gname: "reticulate"
+        }));
+
+        pack.write(readEntry);
+
+        readEntry.write(content);
+        readEntry.end(Buffer.alloc((Math.ceil(content.length / 512) * 512) - content.length));
+        readEntry.end();
+    }
+
+    const hashes: Record<string, string> = {
+        "package.json": sha256(Buffer.from(normalizeJson(manifest)))
+    };
+
+    const packList = NPM.getPackList(path);
+    packList.forEach((filename) => {
+        // We include the package.json last (and we loaded it above)
+        if (filename === "package.json") { return }
+
+        // Add the file and store its hash to compute the tarballHash
+        const content = fs.readFileSync(resolve(path, filename));
+        hashes[filename] = sha256(content);
+        addFile("package", content);
+    });
+
+    manifest.tarballHash = sha256(Buffer.from("{" + packList.map((filename) => {
+        return `${ JSON.stringify(filename) }:"${ hashes[filename] }"`
+    }).join(",") + "}"));
+    manifest.gitHead = "todo";
+
+    addFile("package.json", Buffer.from(normalizeJson(manifest)));
+    pack.end();
+
+    const tarball = writeBuffer.data;
+
+    const integrity = crypto.createHash("sha512").update(tarball).digest("base64");
+
+    manifest._integrity = integrity;
+    manifest._id = `${ manifest.name }@${ manifest.version }`
+    manifest._from = "file:"
+    manifest._resolved = path;
+
+    (<any>tarball).integrity = integrity;
+    (<any>tarball).resolved = path;
+    (<any>tarball).from = "file:";
+
+    return { manifest, tarball };
 }
 
 async function _retryOtp<T>(options: Record<string, any>, func: () => Promise<T>): Promise<T> {
@@ -225,13 +301,15 @@ export class NPM {
         return true;
     }
 
-    async publish(manifest: any, tarData: Buffer): Promise<void> {
+    async publish(path: string): Promise<void> {
         const npmOptions = await this.#getNpmOptions();
         if (npmOptions == null) { throw new Error("not logged in "); }
         const { options } = npmOptions;
 
+        const { manifest, tarball } = createTarball(path);
+
         return _retryOtp(options, async () => {
-            return await npmPublish(manifest, tarData, options);
+            return await npmPublish(manifest, tarball, options);
         });
     }
 
@@ -253,6 +331,7 @@ export class NPM {
 
         // Compute the hash for each file
         const hashes = files.reduce((accum, filename) => {
+console.log("ADDED", filename);
             let content = fs.readFileSync(resolve(path, filename));
 
             // The package.json includes the hash, so we need to nix it to get a consistent hash
@@ -271,83 +350,14 @@ export class NPM {
             return `${ JSON.stringify(filename) }:"${ hashes[filename] }"`
         }).join(",") + "}"));
     }
-/*
-const h = new tar.Header({
-  path: 'some-file.txt',
-  mode: 0o0644,
-  size: size,
-  type: 'File',
-  mtime: new Date(),
-  uid: process.getuid(),
-  gid: process.getgid(),
-  uname: process.env.USER,
-  gname: process.env.GROUP
-})
-*/
+
+
     static createTarball(path: string): Buffer {
-        path = resolve(path);
+        return createTarball(path).tarball;
+    }
 
-        const now = new Date();
-
-        const writeBuffer = new WriteBuffer();
-        const pack = new tar.Pack.Sync({ gzip: true, portable: true });
-        pack.pipe(writeBuffer);
-
-        const addFile = (filename: string, content: Buffer) => {
-            // See: https://github.com/npm/node-tar/issues/143
-            const readEntry = new tar.ReadEntry(new tar.Header({
-                path: filename,
-                mode: 0o0644,
-                size: content.length,
-                type: 'File',
-                mtime: now,
-                uid: process.getuid(),
-                gid: process.getgid(),
-                uname: "ethers",
-                gname: "ethers"
-            }));
-
-            pack.write(readEntry);
-
-            readEntry.write(content);
-            readEntry.end(Buffer.alloc((Math.ceil(content.length / 512) * 512) - content.length));
-            readEntry.end();
-        }
-
-        const hashes: Record<string, string> = { };
-
-        const packList = NPM.getPackList(path);
-        let pkgContent: any = null;
-        packList.forEach((filename) => {
-            const content = fs.readFileSync(resolve(path, filename));
-
-            // We include the package.json last, so we can update the tarballHash
-            if (filename === "package.json") {
-                // Normalize the package (can't have the hsah inside)
-                pkgContent = JSON.parse(content.toString());
-                delete pkgContent.gitHead;
-                delete pkgContent.tarballHash;
-                hashes[filename] = sha256(Buffer.from(normalizeJson(pkgContent)));
-                return;
-            }
-            hashes[filename] = sha256(content);
-            addFile(join("package", filename), content);
-        });
-        if (pkgContent == null) { throw new Error("missing package.json"); }
-
-        pkgContent.tarballHash = sha256(Buffer.from("{" + packList.map((filename) => {
-            return `${ JSON.stringify(filename) }:"${ hashes[filename] }"`
-        }).join(",") + "}"));
-        pkgContent.gitHead = "todo";
-
-        addFile(join("package", "package.json"), Buffer.from(normalizeJson(pkgContent)));
-        pack.end();
-
-        const tarball = writeBuffer.data;
-        (<any>tarball).integrity = crypto.createHash("sha512").update(tarball).digest("base64");
-        (<any>tarball).resolved = path;
-        (<any>tarball).from = "file:";
-        return tarball
+    static createManifest(path: string): PackageJson {
+        return createTarball(path).manifest;
     }
 }
 

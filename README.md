@@ -5,6 +5,7 @@ A simple package manager designed originally for ethers.js.
 
 **Features**
 - All configuration is stored securely, with a memory-hardened key derivation and optional disclosure canary
+- Uses NPM to determine changes and updated package versions
 - Manage npm publishing, GitHub releases and monorepos
 - Simple
 

@@ -150,7 +150,16 @@ async function npmLogout(args: Array<string>): Promise<number> {
 }
 
 async function publish(args: Array<string>): Promise<number> {
-    throw new Error("not implemented");
+   if (await npm.isLoggedIn()) {
+        console.log(colorify.green("Alreay logged in."));
+        return 1;
+    }
+
+    if (args.length === 0) {
+        await npm.publish(".");
+    }
+
+    return 0;
 }
 
 type Command = {
