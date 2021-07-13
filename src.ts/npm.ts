@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import fs from "fs";
-import { join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { Writable } from "stream";
 
 import { publish as npmPublish } from "libnpmpublish";
@@ -9,8 +9,9 @@ import semver from "semver";
 import tar from "tar";
 
 import type { Config } from "./config";
+import { getTag } from "./git";
 import { colorify, getPassword, getPrompt } from "./log";
-import { getUrl, normalizeJson, run, sha256 } from "./utils";
+import { getUrl, loadJson, normalizeJson, run, sha256 } from "./utils";
 
 export type Package = {
     dependencies: { [ name: string ]: string };
@@ -65,12 +66,16 @@ class WriteBuffer extends Writable {
     }
 }
 
-function createTarball(path: string): { tarball: Buffer, manifest: PackageJson } {
+// The `path` must be a folder containing a package.json
+async function createTarball(path: string): Promise<{ tarball: Buffer, manifest: PackageJson }> {
     path = resolve(path);
 
     const manifest = JSON.parse(fs.readFileSync(resolve(path, "package.json")).toString());
     delete manifest.gitHead;
     delete manifest.tarballHash;
+
+    // List of files we need to be executable (in the pkg.bin)
+    const bins = Object.keys(manifest.bin || {}).map((filename) => resolve(path, manifest.bin[filename]));
 
     const now = new Date();
 
@@ -80,10 +85,13 @@ function createTarball(path: string): { tarball: Buffer, manifest: PackageJson }
     pack.pipe(writeBuffer);
 
     const addFile = (filename: string, content: Buffer) => {
+        // Is this file part of pkg.bin?
+        const isBin = (bins.indexOf(resolve(path, filename)) !== -1);
+
         // See: https://github.com/npm/node-tar/issues/143
         const readEntry = new tar.ReadEntry(new tar.Header({
             path: join("package", filename),
-            mode: 0o0644,
+            mode: (isBin ? 0o0755: 0o0644),
             size: content.length,
             type: 'File',
             mtime: now,
@@ -112,29 +120,28 @@ function createTarball(path: string): { tarball: Buffer, manifest: PackageJson }
         // Add the file and store its hash to compute the tarballHash
         const content = fs.readFileSync(resolve(path, filename));
         hashes[filename] = sha256(content);
-        addFile("package", content);
+        addFile(filename, content);
     });
 
     manifest.tarballHash = sha256(Buffer.from("{" + packList.map((filename) => {
         return `${ JSON.stringify(filename) }:"${ hashes[filename] }"`
     }).join(",") + "}"));
-    manifest.gitHead = "todo";
+    manifest.gitHead = await getTag(path);
 
     addFile("package.json", Buffer.from(normalizeJson(manifest)));
     pack.end();
 
     const tarball = writeBuffer.data;
 
-    const integrity = crypto.createHash("sha512").update(tarball).digest("base64");
-
-    manifest._integrity = integrity;
     manifest._id = `${ manifest.name }@${ manifest.version }`
-    manifest._from = "file:"
-    manifest._resolved = path;
 
-    (<any>tarball).integrity = integrity;
-    (<any>tarball).resolved = path;
-    (<any>tarball).from = "file:";
+    manifest._integrity = crypto.createHash("sha512").update(tarball).digest("base64");
+    manifest._from = "file:"
+    manifest._resolved = "/home/reticulate/faux-working";
+
+    (<any>tarball).integrity = manifest._integrity;
+    (<any>tarball).resolved = manifest._resolved;;
+    (<any>tarball).from = manifest._from;
 
     return { manifest, tarball };
 }
@@ -212,6 +219,19 @@ export class NPM {
             tarballHash: info.tarballHash || null,
             version : info.version,
             //_ethers_nobuild: !!info._ethers_nobuild,
+        };
+    }
+
+    loadPackage(path?: string): Package {
+        if (path == null) { path = "./package.json"; }
+        const pkg = loadJson(resolve(path));
+        return {
+            dependencies: (pkg.dependencies || {}),
+            devDependencies: (pkg.devDependencies || {}),
+            gitHead: pkg.gitHead || null,
+            name: pkg.name,
+            tarballHash: NPM.computeTarballHash(dirname(path)),
+            version: pkg.version,
         };
     }
 
@@ -301,22 +321,22 @@ export class NPM {
         return true;
     }
 
-    async publish(path: string): Promise<void> {
+    async publish(path: string): Promise<PackageJson> {
         const npmOptions = await this.#getNpmOptions();
         if (npmOptions == null) { throw new Error("not logged in "); }
         const { options } = npmOptions;
 
-        const { manifest, tarball } = createTarball(path);
-
+        const { manifest, tarball } = await createTarball(path);
         return _retryOtp(options, async () => {
-            return await npmPublish(manifest, tarball, options);
+            await npmPublish(manifest, tarball, options);
+            return manifest;
         });
     }
 
     static getPackList(path: string): Array<string> {
         const result = run("npm", [ "pack", "--json", path, "--dry-run" ]);
         if (!result.ok) {
-            const error = new Error(`failed to run npm pack: ${ name }`);
+            const error = new Error(`failed to run npm pack: ${ path }`);
             (<any>error).result = result;
             throw error;
         }
@@ -331,7 +351,6 @@ export class NPM {
 
         // Compute the hash for each file
         const hashes = files.reduce((accum, filename) => {
-console.log("ADDED", filename);
             let content = fs.readFileSync(resolve(path, filename));
 
             // The package.json includes the hash, so we need to nix it to get a consistent hash
@@ -352,15 +371,17 @@ console.log("ADDED", filename);
     }
 
 
-    static createTarball(path: string): Buffer {
-        return createTarball(path).tarball;
+    static async createTarball(path: string): Promise<Buffer> {
+        return (await createTarball(path)).tarball;
     }
 
-    static createManifest(path: string): PackageJson {
-        return createTarball(path).manifest;
+    static async createManifest(path: string): Promise<PackageJson> {
+        return (await createTarball(path)).manifest;
     }
 }
 
-const tarball = NPM.createTarball(".");
-console.log("NPM", tarball);
-fs.writeFileSync("./test-tarball.tgz", tarball);
+(async function() {
+    const { manifest, tarball } = await createTarball(".");
+    console.log("NPM", tarball, manifest);
+    //fs.writeFileSync("./test-tarball.tgz", tarball);
+})();

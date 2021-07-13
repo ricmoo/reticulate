@@ -254,7 +254,8 @@ function getDate(date: Date): string {
     ].join("-");
 }
 
-export function getDateTime(date: Date): string {
+export function getDateTime(date?: Date): string {
+    if  (date == null) { date = new Date(); }
     return getDate(date) + " " + [
         zpad(date.getHours()) ,
         zpad(date.getMinutes() + 1)

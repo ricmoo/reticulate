@@ -1,6 +1,6 @@
 {
   "name": "reticulate",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Package manager with password protected storage.",
   "main": "./lib/index.js",
   "dependencies": {
