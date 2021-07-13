@@ -33,4 +33,4 @@ export declare function normalizeJson(data: any): any;
 export declare function saveJson(filename: string, data: any, sort?: boolean): void;
 export declare function getUrl(href: string, options?: GetUrlOptions): Promise<GetUrlResponse>;
 export declare function run(progname: string, args?: Array<string>, currentWorkingDirectory?: string): RunResult;
-export declare function getDateTime(date: Date): string;
+export declare function getDateTime(date?: Date): string;

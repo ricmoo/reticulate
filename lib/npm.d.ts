@@ -31,13 +31,14 @@ export declare class NPM {
     getPackageInfo(name: string): Promise<any>;
     getPackageVersions(name: string): Promise<Array<string>>;
     getPackage(name: string, version?: string): Promise<null | Package>;
+    loadPackage(path?: string): Package;
     isLoggedIn(): Promise<null | NpmAccount>;
     login(): Promise<boolean>;
     getLogins(): Promise<null | Array<NpmLogin>>;
     logout(): Promise<boolean>;
-    publish(path: string): Promise<void>;
+    publish(path: string): Promise<PackageJson>;
     static getPackList(path: string): Array<string>;
     static computeTarballHash(path: string): string;
-    static createTarball(path: string): Buffer;
-    static createManifest(path: string): PackageJson;
+    static createTarball(path: string): Promise<Buffer>;
+    static createManifest(path: string): Promise<PackageJson>;
 }
