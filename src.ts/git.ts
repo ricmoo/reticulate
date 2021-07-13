@@ -102,8 +102,3 @@ export async function getChanges(since: string, path?: string): Promise<Array<Gi
     return changes;
 }
 
-(async function() {
-    const status = await getChanges("b12386232820e5ceecc23a5eec53c49faaf223df", ".");
-    console.log(status);
-})();
-

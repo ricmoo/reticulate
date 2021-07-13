@@ -380,8 +380,3 @@ export class NPM {
     }
 }
 
-(async function() {
-    const { manifest, tarball } = await createTarball(".");
-    console.log("NPM", tarball, manifest);
-    //fs.writeFileSync("./test-tarball.tgz", tarball);
-})();

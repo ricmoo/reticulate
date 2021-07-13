@@ -119,10 +119,3 @@ export class ChangeLog {
         return new ChangeLog(title, banner.trim(), versions);
     }
 }
-
-(async function() {
-    const fs = require("fs");
-    const changelog = ChangeLog.from(fs.readFileSync("../ethers/ethers.js/CHANGELOG.md").toString());
-    //console.dir(changelog, { depth: null });
-    console.log(changelog.markdown());
-})();
