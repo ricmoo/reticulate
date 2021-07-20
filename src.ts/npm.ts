@@ -322,11 +322,17 @@ export class NPM {
     }
 
     async publish(path: string): Promise<PackageJson> {
+        const { manifest, tarball } = await createTarball(path);
+
         const npmOptions = await this.#getNpmOptions();
         if (npmOptions == null) { throw new Error("not logged in "); }
         const { options } = npmOptions;
 
-        const { manifest, tarball } = await createTarball(path);
+        if (manifest.publishConfig) {
+            if (manifest.publishConfig.access) { options.access = manifest.publishConfig.access; }
+            if (manifest.publishConfig.tag) { options.tag = manifest.publishConfig.tag; }
+        }
+
         return _retryOtp(options, async () => {
             await npmPublish(manifest, tarball, options);
             return manifest;
