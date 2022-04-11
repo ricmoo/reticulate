@@ -330,7 +330,7 @@ export class NPM {
 
         if (manifest.publishConfig) {
             if (manifest.publishConfig.access) { options.access = manifest.publishConfig.access; }
-            if (manifest.publishConfig.tag) { options.tag = manifest.publishConfig.tag; }
+            if (manifest.publishConfig.tag) { options.defaultTag = manifest.publishConfig.tag; }
         }
 
         return _retryOtp(options, async () => {
