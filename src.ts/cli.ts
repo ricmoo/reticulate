@@ -291,7 +291,6 @@ let debug = false;
         if (arg === "--") {
             endOfOptions = true;
         } else if (!endOfOptions && arg.substring(0, 2) === "--") {
-            console.log(arg);
             const match = arg.match(/^--([a-z0-9]+)(=(.*))?$/);
             if (match == null) { throw new Error("internal error: null option match"); }
             if (match[2]) {

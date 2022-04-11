@@ -246,7 +246,6 @@ export class MonoRepo {
 
         // Make a symlink in the ROOT/node_modules to each package in this repo
         this.packages.forEach((pkg) => {
-            console.log(pkg);
 
             // e.g. /node_modules/@ethersproject/abi => ../../packages/abi
             {
@@ -271,7 +270,6 @@ export class MonoRepo {
             // /.package_node_modules/abi/@foo/bar => ../../node_modules/@foo/bar
 
             const deps = pkg.allDependencies;
-            //console.log(deps);
             for (const dep in deps) {
                 const target = resolve(this.root, ".package_node_modules", pkg.folder, dep);
                 const src = resolve(this.root, "node_modules", dep);
@@ -312,7 +310,7 @@ export class MonoRepo {
         }
 
         this.packages.forEach((pkg) => {
-            console.log(pkg);
+            //console.log(pkg);
         });
     }
 }
