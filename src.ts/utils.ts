@@ -4,7 +4,7 @@ import fs from "fs";
 import http from "http";
 import https from "https";
 import os from "os";
-import { resolve } from "path";
+import { dirname, resolve } from "path";
 import { parse } from "url"
 
 export type GetUrlResponse = {
@@ -56,6 +56,23 @@ export function stall(duration: number): Promise<void> {
     });
 }
 
+export function link(existing: string, path: string): void {
+    try {
+        const current = fs.readlinkSync(path);
+
+        // Alerady linked
+        if (current === existing) { return; }
+
+        fs.unlinkSync(path);
+    } catch (error) {
+        if (error.code !== "ENOENT") { throw error; }
+    }
+
+    // Link
+    const dir = dirname(path);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.symlinkSync(existing, path, "junction");
+}
 
 export function atomicWrite(path: string, value: string | Uint8Array): void {
     const tmp = resolve(os.homedir(), ".reticulate-tmp-delete-me");
@@ -261,3 +278,28 @@ export function getDateTime(date?: Date): string {
         zpad(date.getMinutes() + 1)
     ].join(":");
 }
+
+function _walk(path: string, func: (filename: string) => void): void {
+    if (fs.statSync(path).isDirectory()) {
+        fs.readdirSync(path).forEach((filename) => {
+            if (filename[0] !== ".") {
+                walk(resolve(path, filename), func);
+            }
+        });
+    } else {
+        func(path);
+    }
+}
+
+export function walk(path: string, func: (filename: string) => void) {
+    _walk(resolve(path), func);
+}
+/*
+    _walk(resolve(path), (filename) => {
+        const data = fs.readFileSync(filename);
+        for (let i = 0; i < data.length; i++) {
+            if (data[i] & 0x80) { throw new Error("non-ascii"); }
+        }
+    });
+
+*/

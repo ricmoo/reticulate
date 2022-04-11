@@ -40,7 +40,7 @@ sub-folder will be made.
 - `/.package_node_modules/`
 - `/.package_node_modules/subPackage1/`
 - `/.package_node_modules/subPackage1/dep1 => /node_modules/dep1`
-- `/.package_node_modules/subPackage1/dep2 => /node_modules/dep2
+- `/.package_node_modules/subPackage1/dep2 => /node_modules/dep2`
 - `/.package_node_modules/subPackage2/`
 - `/.package_node_modules/subPackage2/dep1 => /node_modules/dep1`
 - `/packages/subPackage1/` (depends on dep1 and dep2)
@@ -66,6 +66,12 @@ Command-Line Interface
 /home/ricmoo> reticulate npm-login
 /home/ricmoo> reticulate npm-logins
 /home/ricmoo> reticulate npm-logout [ TOKEN ... ]
+```
+
+**Building**
+
+```
+/home/ricmoo> reticulate ratsnest
 ```
 
 **Publishing**

@@ -1,6 +1,6 @@
 {
   "name": "reticulate",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Package manager with password protected storage.",
   "main": "./lib/index.js",
   "publishConfig": {
@@ -27,6 +27,14 @@
     "auto-build": "npm run build -- -w",
     "build": "tsc --build ./tsconfig.json",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "reticulate": {
+    "spellCheck": {
+      "paths": [
+        "/usr/share/dict/words",
+        "spellcheck"
+      ]
+    }
   },
   "keywords": [
     "reticulate",

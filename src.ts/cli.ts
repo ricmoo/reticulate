@@ -7,9 +7,11 @@ import semver from "semver";
 
 import { Config, ConfigError } from "./config";
 import { colorify } from "./log";
-import type { NpmLogin } from "./npm";
 import { NPM } from "./npm";
 import { getDateTime } from "./utils";
+import { MonoRepo } from "./monorepo";
+
+import type { NpmLogin } from "./npm";
 
 function showHelp() {
     console.log("Usage:");
@@ -35,6 +37,9 @@ function showHelp() {
     console.log("  npm-logins             Show all login sessions");
     console.log("  npm-logout [ ID ... ]  Logout of NPM (default: current)");
     console.log("  publish [ DIR ... ]    Publish a package (default: .)");
+    console.log("");
+    console.log("Misc Commands");
+    console.log("  check-files            Run various checks on source");
     console.log("");
 }
 
@@ -73,7 +78,12 @@ async function hoist(args: Array<string>, options: Record<string, string>): Prom
 }
 
 async function ratsnest(args: Array<string>, options: Record<string, string>): Promise<number> {
-    throw new Error("not implemented");
+    const repo = new MonoRepo(".");
+    //console.log(repo, repo.packages.map(p => ([ p.name, p.path ])));
+    repo.updateTsconfig();
+    repo.createRatsnest();
+    repo.updateVersionConsts(); // @TODO: move to something else
+    return 0;
 }
 
 async function bump(args: Array<string>, options: Record<string, string>): Promise<number> {
@@ -195,6 +205,36 @@ async function publish(args: Array<string>, options: Record<string, string>): Pr
 
     return 0;
 }
+/*
+function walk(path: string, result: Array<string>): void {
+    if (fs.statSync(path).isDirectory()) {
+        fs.readdirSync(path).forEach((filename) => {
+            if (filename[0] !== ".") {
+                walk(resolve(path, filename), result);
+            }
+        });
+    } else {
+        result.push(path);
+    }
+}
+*/
+async function checkFiles(args: Array<string>, options: Record<string, string>): Promise<number> {
+    const repo = new MonoRepo(".");
+    console.log(repo);
+    repo.checkFiles();
+    /*
+    const files: Array<string> = [];
+    args.forEach((path) => { walk(resolve(path), files); });
+    files.forEach((filename) => {
+        const data = fs.readFileSync(filename);
+        for (let i = 0; i < data.length; i++) {
+            if (data[i] & 0x80) { throw new Error("non-ascii"); }
+        }
+    });
+    console.log(files);
+    */
+    return 0;
+}
 
 type Command = {
     func: (args: Array<string>, options: Record<string, string>) => Promise<number>;
@@ -220,6 +260,8 @@ const commands: Record<string, Command> = {
     "npm-logout": { func: npmLogout },
 
     "publish": { func: publish, args: "PATH [ PATH ... ]" },
+
+    "check-files": { func: checkFiles, args: "PATH [ PATH ... ]" },
 };
 
 function shiftArgs(args: Array<string>): string {
@@ -227,14 +269,18 @@ function shiftArgs(args: Array<string>): string {
     if (result == null) { throw new Error("missing argument"); }
     return result;
 }
-
-function checkArgs(args: Array<string>, key: string): boolean {
+/*
+function checkOptions(options Record<string, string>, key: string): boolean {
+    const value = options[key];
+    delete options[key];
+    return 
+console.log(args, key);
     const index = args.indexOf(key);
     if (index === -1) { return false; }
     args.splice(index, 1);
     return true;
 }
-
+*/
 let debug = false;
 (async function() {
     const args: Array<string> = [ ];
@@ -258,12 +304,13 @@ let debug = false;
         }
     });
 
-    debug = checkArgs(args, "--debug");
+    debug = !!options.debug;
+    delete options.debug;
 
-    if (checkArgs(args, "--version")) {
+    if (options.version) {
         console.log("show version");
         return 0;
-    } else if (checkArgs(args, "--help") || args.length === 0) {
+    } else if (options.help || args.length === 0) {
         showHelp();
         return 0;
     }
