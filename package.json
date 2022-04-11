@@ -1,6 +1,6 @@
 {
   "name": "reticulate",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Package manager with password protected storage.",
   "main": "./lib/index.js",
   "publishConfig": {
@@ -13,7 +13,7 @@
     "npm-profile": "^5.0.4",
     "scrypt-js": "^3.0.1",
     "semver": "^7.3.5",
-    "tar": "6.1.6"
+    "tar": "^6.1.11"
   },
   "devDependencies": {
     "@types/node": "^16.0.1",
